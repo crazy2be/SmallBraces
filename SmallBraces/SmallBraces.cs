@@ -1,48 +1,60 @@
 ﻿using System;
 using System.ComponentModel.Composition;
 using System.Diagnostics;
-using System.Linq;
-using System.Net.Mime;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Shapes;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
+using Microsoft.VisualStudio.Text.Editor.OptionsExtensionMethods;
 using Microsoft.VisualStudio.Text.Formatting;
 using Microsoft.VisualStudio.Utilities;
 
 namespace SmallBraces
 {
-    ///<summary>
-    ///SmallBraces places red boxes behind all the "A"s in the editor window
-    ///</summary>
-    public class SmallBraces : ILineTransformSource
+    public class SmallBraces
     {
-        private static readonly double AlmostZero = 0.0000000001;
-        private static readonly LineTransform _defaultTransform = new LineTransform(0.0, 0.0, 1.0);
-        private static readonly LineTransform _braceTransform = new LineTransform(0.0, 0.0, AlmostZero);
-        private static readonly LineTransform _blankLineTransform = new LineTransform(0.0, 0.0, 0.5);
-        private static readonly LineTransform _commentCruftTransform = _braceTransform;
+        private readonly Image _cursor;
         private readonly IWpfTextView _view;
         private readonly IAdornmentLayer _layer;
+        private readonly double _normalLineHeight;
 
-
-        private SmallBraces(IWpfTextView view)
+        public SmallBraces(IWpfTextView view)
         {
             this._view = view;
             _layer = view.GetAdornmentLayer("SmallBracesAdornment");
-            view.LayoutChanged += OnLayoutChanged;
-            view.Caret.PositionChanged += OnCaretPositionChanged;
             Debug.Assert(_layer != null);
+            //var props = _view.FormattedLineSource.DefaultTextProperties;
+            //props.FontRenderingEmSize
+            _normalLineHeight = (double)new FontSizeConverter().ConvertFrom("10pt");
+            _cursor = makeCursor();
         }
-
-        public static SmallBraces Create(IWpfTextView view)
+        private Image makeCursor()
         {
-            return view.Properties.GetOrCreateSingletonProperty<SmallBraces>(() => new SmallBraces(view));
+            // Ghetto _cursor
+            Debug.Assert(_normalLineHeight > 0.0);
+            Rect r = new Rect(0, 0, 1, _normalLineHeight);
+            Geometry g = new RectangleGeometry(r);
+            //_view.Properties.GetProperty();
+            Brush b = new SolidColorBrush(Colors.Black);
+            GeometryDrawing drawing = new GeometryDrawing(b, new Pen(), g);
+            DrawingImage drawingImage = new DrawingImage(drawing);
+            Image image = new Image();
+            image.Source = drawingImage;
+            
+
+            // TODO: This animation doesn't seem to work??
+//            var anim = new ObjectAnimationUsingKeyFrames();
+//            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Visible, KeyTime.FromPercent(0.5)));
+//            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Hidden, KeyTime.FromPercent(1.0)));
+//            anim.RepeatBehavior = RepeatBehavior.Forever;
+//            anim.Duration = TimeSpan.FromMilliseconds(3000);
+//            anim.BeginTime = TimeSpan.Zero;
+//            image.BeginAnimation(Image.VisibilityProperty, anim);
+
+            return image;
         }
 
         private enum LineType
@@ -52,7 +64,6 @@ namespace SmallBraces
             JustBraces,
             Default,
         };
-
         private LineType GetLineStringType(string line)
         {
             line = line.Trim();
@@ -61,58 +72,6 @@ namespace SmallBraces
             if (Regex.IsMatch(line, @"^[(){}\s]+$")) return LineType.JustBraces;
             return LineType.Default;
         }
-
-        private LineType GetLineType(ITextViewLine line)
-        {
-            if (line.Length > 100) return LineType.Default;
-            return GetLineStringType(LineToString(line));
-        }
-        public LineTransform GetLineTransformInternal(ITextViewLine line)
-        {
-            switch (GetLineType(line))
-            {
-                case LineType.JustWhitespace:
-                    return _blankLineTransform;
-                case LineType.JustCommentCruft:
-                    return _commentCruftTransform;
-                case LineType.JustBraces:
-                    return _braceTransform;
-                case LineType.Default:
-                    return _defaultTransform;
-                default:
-                    Debug.Assert(false);
-                    throw new SystemException(); // Should never happen
-            }
-        }
-        public LineTransform GetLineTransform(ITextViewLine line, double yPosition, ViewRelativePosition placement)
-        {
-            try
-            {
-//                return _defaultTransform;
-                LineTransform expected = GetLineTransformInternal(line);
-                return expected;
-            }
-            catch (Exception ex)
-            {
-                Debugger.Break();
-                return _defaultTransform;
-            }
-        }
-
-        private ITextViewLine GetLineByPos(CaretPosition pos)
-        {
-            return _view.GetTextViewLineContainingBufferPosition(pos.BufferPosition);
-        }
-
-
-        void OnLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
-        {
-            foreach (ITextViewLine line in e.NewOrReformattedLines)
-            {
-                this.CreateVisuals(line);
-            }
-        }
-
         private string LineToString(ITextViewLine line)
         {
             string s = "";
@@ -123,20 +82,43 @@ namespace SmallBraces
             }
             return s;
         }
-        private static readonly double normalLineHeight = (double)new FontSizeConverter().ConvertFrom("10pt");
+        private LineType GetLineType(ITextViewLine line)
+        {
+            if (line.Length > 100) return LineType.Default;
+            return GetLineStringType(LineToString(line));
+        }
+        public LineTransform GetLineTransform(ITextViewLine line)
+        {
+            switch (GetLineType(line))
+            {
+                case LineType.JustWhitespace:
+                    return new LineTransform(0.5);
+                case LineType.JustCommentCruft:
+                case LineType.JustBraces:
+                    return new LineTransform(0.0000000001);
+                case LineType.Default:
+                    return new LineTransform(1.0);
+            }
+            throw new SystemException("Should not get here");
+        }
 
+        private ITextViewLine GetLineByPos(CaretPosition pos)
+        {
+            return _view.GetTextViewLineContainingBufferPosition(pos.BufferPosition);
+        }
         private SnapshotSpan LineSpan(ITextViewLine line)
         {
             var start = line.Start.Position;
             while (start < line.End.Position && Char.IsWhiteSpace(line.Snapshot[start])) start++;
             return new SnapshotSpan(_view.TextSnapshot, Span.FromBounds(start, line.End.Position));
         }
-        private UIElement CreateVisualsInternal(ITextViewLine line)
+
+        private UIElement GetVisuals(ITextViewLine line)
         {
-            var h = normalLineHeight/2;
+            var h = _normalLineHeight/2;
             if (line.ContainsBufferPosition(_view.Selection.ActivePoint.Position))
             {
-                h = normalLineHeight;
+                h = _normalLineHeight;
             }
             if (GetLineType(line) == LineType.Default) return null;
 
@@ -158,65 +140,15 @@ namespace SmallBraces
             textblock.RenderTransform = t;
             return textblock;
         }
-        private void CreateVisuals(ITextViewLine line)
+        public void CreateVisuals(ITextViewLine line)
         {
-            try
+            var element = GetVisuals(line);
+            if (element != null)
             {
-                UIElement element = CreateVisualsInternal(line);
-                if (element != null)
-                {
-                    _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, LineSpan(line), null, element, null);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debugger.Break();
+                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, LineSpan(line), null, element, null);
             }
         }
-        
-        private Image cursor = makeCursor();
-
-        private static Image makeCursor()
-        {
-            try
-            {
-                return makeCursorInternal();
-            }
-            catch (Exception e)
-            {
-                Debugger.Break();
-                return null;
-            }
-        }
-        private static Image makeCursorInternal()
-        {
-            // Ghetto cursor
-            Rect r = new Rect(0, 0, 1, normalLineHeight);
-            Geometry g = new RectangleGeometry(r);
-            Brush b = new SolidColorBrush(Colors.Black);
-            GeometryDrawing drawing = new GeometryDrawing(b, new Pen(), g);
-            DrawingImage drawingImage = new DrawingImage(drawing);
-            Image image = new Image();
-            image.Source = drawingImage;
-            var anim = new ObjectAnimationUsingKeyFrames();
-            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Visible));
-            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Hidden));
-            anim.RepeatBehavior = RepeatBehavior.Forever;
-            anim.Duration = TimeSpan.FromMilliseconds(300);
-            anim.BeginTime = TimeSpan.Zero;
-            image.BeginAnimation(Image.VisibilityProperty, anim);
-
-            return image;
-        }
-        private void AddLineAdornment(ITextViewLine line)
-        {
-            UIElement newAdornment = CreateVisualsInternal(line);
-            if (newAdornment != null)
-            {
-                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, LineSpan(line), null, newAdornment, null);
-            }
-        }
-        void OnCaretPositionChangedInternal(object sender, CaretPositionChangedEventArgs e)
+        public void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e)
         {
             ITextViewLine newLine = GetLineByPos(e.NewPosition);
             ITextViewLine oldLine = GetLineByPos(e.OldPosition);
@@ -226,58 +158,96 @@ namespace SmallBraces
                 // Fisheye effect for current line
                 _layer.RemoveAdornmentsByVisualSpan(LineSpan(oldLine));
                 _layer.RemoveAdornmentsByVisualSpan(LineSpan(newLine));
-                AddLineAdornment(newLine);
-                AddLineAdornment(oldLine);
+                CreateVisuals(newLine);
+                CreateVisuals(oldLine);
             }
 
-            _layer.RemoveAdornment(cursor);
+            _layer.RemoveAdornment(_cursor);
             if (GetLineType(newLine) != LineType.Default)
             {
-                var span = new SnapshotSpan(_view.TextSnapshot, e.NewPosition.BufferPosition, 1);
-                Geometry g = _view.TextViewLines.GetMarkerGeometry(span);
-                Canvas.SetLeft(cursor, g.Bounds.Left);
-                Canvas.SetTop(cursor, g.Bounds.Top - normalLineHeight/2 + 2.0 /*fudge it yeeeeeah*/);
+                SnapshotSpan span;
                 try
                 {
-                    _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, cursor, null);
+                    span = new SnapshotSpan(_view.TextSnapshot, e.NewPosition.BufferPosition, 1);
                 }
                 catch (ArgumentOutOfRangeException ex)
                 {
                     // TODO: End of document makes span invalid. What we really want is a length
-                    // of zero, but AddAdornment pukes when we try that...
+                    // of zero, but GetMarkerGeometry doesn't like that (gives us a null rectangle)
+                    return;
                 }
+                Geometry g = _view.TextViewLines.GetMarkerGeometry(span);
+                Canvas.SetLeft(_cursor, g.Bounds.Left);
+                Canvas.SetTop(_cursor, g.Bounds.Top - _normalLineHeight/2 + 2.0 /*fudge it yeeeeeah*/);
+                
+                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, _cursor, null);
             }
         }
-        void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e)
+    }
+
+    public class SmallBracesWrapper : ILineTransformSource
+    {
+        private readonly SmallBraces _wrapped;
+        private SmallBracesWrapper(IWpfTextView view)
         {
             try
             {
-                OnCaretPositionChangedInternal(sender, e);
+                _wrapped = new SmallBraces(view);
+                view.LayoutChanged += OnLayoutChanged;
+                view.Caret.PositionChanged += OnCaretPositionChanged;
             }
             catch (Exception ex)
             {
                 Debugger.Break();
             }
-//            ITextViewLine newLine = GetLineByPos(e.NewPosition);
-//            ITextViewLine oldLine = GetLineByPos(e.OldPosition);
-//            if (newLine != oldLine)
-//            {
-//                var top = _view.GetTextViewLineContainingBufferPosition(e.NewPosition.BufferPosition).Top;
-//                
-//                // Forcefully invalidate the line we were on and the line we are moving to.
-//                // This feels like a bit more of a hack than it should be, but hey, it works!
-//                _view.DisplayTextLineContainingBufferPosition(
-//                    e.OldPosition.BufferPosition,
-//                    top,
-//                    ViewRelativePosition.Top);
-//                _view.DisplayTextLineContainingBufferPosition(
-//                    e.NewPosition.BufferPosition,
-//                    top,
-//                    ViewRelativePosition.Top);
-//            }
+        }
+        void OnLayoutChanged(object sender, TextViewLayoutChangedEventArgs e)
+        {
+            foreach (ITextViewLine line in e.NewOrReformattedLines)
+            {
+                this.CreateVisuals(line);
+            }
+        }
+        public static SmallBracesWrapper Create(IWpfTextView view)
+        {
+            return view.Properties.GetOrCreateSingletonProperty<SmallBracesWrapper>(() => new SmallBracesWrapper(view));
+        }
+        public void CreateVisuals(ITextViewLine line)
+        {
+            try
+            {
+                _wrapped.CreateVisuals(line);
+            }
+            catch (Exception ex)
+            {
+                Debugger.Break();
+            }
+        }
+
+        public void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e)
+        {
+            try
+            {
+                _wrapped.OnCaretPositionChanged(sender, e);
+            }
+            catch (Exception ex)
+            {
+                Debugger.Break();
+            }
+        }
+        public LineTransform GetLineTransform(ITextViewLine line, double yPosition, ViewRelativePosition placement)
+        {
+            try
+            {
+                return _wrapped.GetLineTransform(line);
+            }
+            catch (Exception ex)
+            {
+                Debugger.Break();
+                return new LineTransform(1.0);
+            }
         }
     }
-
     [Export(typeof(IWpfTextViewCreationListener))]
     [ContentType("text")]
     [TextViewRole(PredefinedTextViewRoles.Document)]
@@ -295,7 +265,7 @@ namespace SmallBraces
 
         public void TextViewCreated(IWpfTextView textView)
         {
-            SmallBraces.Create(textView);
+            SmallBracesWrapper.Create(textView);
         }
     }
 
@@ -304,7 +274,7 @@ namespace SmallBraces
     {
         ILineTransformSource ILineTransformSourceProvider.Create(IWpfTextView textView)
         {
-            return SmallBraces.Create(textView);
+            return SmallBracesWrapper.Create(textView);
         }
     }
 }
