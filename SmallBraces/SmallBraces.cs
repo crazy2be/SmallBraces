@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
@@ -172,8 +173,22 @@ namespace SmallBraces
                 Debugger.Break();
             }
         }
+        
         private Image cursor = makeCursor();
+
         private static Image makeCursor()
+        {
+            try
+            {
+                return makeCursorInternal();
+            }
+            catch (Exception e)
+            {
+                Debugger.Break();
+                return null;
+            }
+        }
+        private static Image makeCursorInternal()
         {
             // Ghetto cursor
             Rect r = new Rect(0, 0, 1, normalLineHeight);
@@ -183,6 +198,14 @@ namespace SmallBraces
             DrawingImage drawingImage = new DrawingImage(drawing);
             Image image = new Image();
             image.Source = drawingImage;
+            var anim = new ObjectAnimationUsingKeyFrames();
+            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Visible));
+            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Hidden));
+            anim.RepeatBehavior = RepeatBehavior.Forever;
+            anim.Duration = TimeSpan.FromMilliseconds(300);
+            anim.BeginTime = TimeSpan.Zero;
+            image.BeginAnimation(Image.VisibilityProperty, anim);
+
             return image;
         }
         private void AddLineAdornment(ITextViewLine line)
@@ -198,26 +221,32 @@ namespace SmallBraces
             ITextViewLine newLine = GetLineByPos(e.NewPosition);
             ITextViewLine oldLine = GetLineByPos(e.OldPosition);
 
+            if (oldLine != newLine)
+            {
+                // Fisheye effect for current line
+                _layer.RemoveAdornmentsByVisualSpan(LineSpan(oldLine));
+                _layer.RemoveAdornmentsByVisualSpan(LineSpan(newLine));
+                AddLineAdornment(newLine);
+                AddLineAdornment(oldLine);
+            }
+
             _layer.RemoveAdornment(cursor);
             if (GetLineType(newLine) != LineType.Default)
             {
-                // TODO: End of document makes this invalid. What we really want is a length
-                // of zero, but AddAdornment pukes when we try that...
                 var span = new SnapshotSpan(_view.TextSnapshot, e.NewPosition.BufferPosition, 1);
                 Geometry g = _view.TextViewLines.GetMarkerGeometry(span);
                 Canvas.SetLeft(cursor, g.Bounds.Left);
                 Canvas.SetTop(cursor, g.Bounds.Top - normalLineHeight/2 + 2.0 /*fudge it yeeeeeah*/);
-                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, cursor, null);
+                try
+                {
+                    _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, cursor, null);
+                }
+                catch (ArgumentOutOfRangeException ex)
+                {
+                    // TODO: End of document makes span invalid. What we really want is a length
+                    // of zero, but AddAdornment pukes when we try that...
+                }
             }
-
-            if (oldLine == newLine)
-            {
-                return;
-            }
-            _layer.RemoveAdornmentsByVisualSpan(LineSpan(oldLine));
-            _layer.RemoveAdornmentsByVisualSpan(LineSpan(newLine));
-            AddLineAdornment(newLine);
-            AddLineAdornment(oldLine);
         }
         void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e)
         {
