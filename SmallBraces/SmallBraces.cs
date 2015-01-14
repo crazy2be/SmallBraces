@@ -19,10 +19,11 @@ namespace SmallBraces
     ///</summary>
     public class SmallBraces : ILineTransformSource
     {
+        private static readonly double AlmostZero = 0.0000000001;
         private static readonly LineTransform _defaultTransform = new LineTransform(0.0, 0.0, 1.0);
-        private static readonly LineTransform _braceTransform = new LineTransform(0.0, 0.0, 0.05);
+        private static readonly LineTransform _braceTransform = new LineTransform(0.0, 0.0, AlmostZero);
         private static readonly LineTransform _blankLineTransform = new LineTransform(0.0, 0.0, 0.5);
-        private static readonly LineTransform _commentCruftTransform = new LineTransform(0.0, 0.0, 0.1);
+        private static readonly LineTransform _commentCruftTransform = _braceTransform;
         private readonly IWpfTextView _view;
         private readonly IAdornmentLayer _layer;
 
@@ -49,31 +50,23 @@ namespace SmallBraces
             Default,
         };
 
-        private LineType GetLineType(string line)
+        private LineType GetLineStringType(string line)
         {
             line = line.Trim();
-            if (line.Equals(""))
-            {
-                return LineType.JustWhitespace;
-            }
-            if (line.Equals("/// <summary>") || line.Equals("/// </summary>"))
-            {
-                return LineType.JustCommentCruft;
-            }
-            if (Regex.IsMatch(line, @"^[(){}\s]+$")) // Do I have to escape these?
-            {
-                return LineType.JustBraces;
-            }
+            if (line.Equals("")) return LineType.JustWhitespace;
+            if (line.Equals("/// <summary>") || line.Equals("/// </summary>")) return LineType.JustCommentCruft;
+            if (Regex.IsMatch(line, @"^[(){}\s]+$")) return LineType.JustBraces;
             return LineType.Default;
+        }
+
+        private LineType GetLineType(ITextViewLine line)
+        {
+            if (line.Length > 100) return LineType.Default;
+            return GetLineStringType(LineToString(line));
         }
         public LineTransform GetLineTransformInternal(ITextViewLine line)
         {
-            if (line.Length > 100)
-            {
-                return _defaultTransform;
-            }
-            LineType type = GetLineType(LineToString(line));
-            switch (type)
+            switch (GetLineType(line))
             {
                 case LineType.JustWhitespace:
                     return _blankLineTransform;
@@ -93,13 +86,7 @@ namespace SmallBraces
             try
             {
 //                return _defaultTransform;
-
                 LineTransform expected = GetLineTransformInternal(line);
-//            if (line.ContainsBufferPosition(_view.Selection.ActivePoint.Position))
-//            {
-//                var h = 1.0 / expected.VerticalScale;
-//                return new LineTransform(h/2, h/2, expected.VerticalScale);
-//            }
                 return expected;
             }
             catch (Exception ex)
@@ -148,51 +135,26 @@ namespace SmallBraces
             {
                 h = normalLineHeight;
             }
-            var str = LineToString(line).Trim();
-            var type = GetLineType(str);
-            if (type == LineType.Default)
-            {
-                return null;
-            }
+            if (GetLineType(line) == LineType.Default) return null;
 
             IWpfTextViewLineCollection textViewLines = _view.TextViewLines;
             Geometry g = textViewLines.GetMarkerGeometry(LineSpan(line));
-            if (g == null)
-            {
-                // This happens sometimes, not really sure why :(
-                return null;
-            }
+            if (g == null) return null; // This happens sometimes, not really sure why :(
             Rect r = g.Bounds;
-//            r.Height += 20;
             r.Y -= h/2;
             g = new RectangleGeometry(r);
 
             var textblock = new TextBlock();
-            textblock.Text = str; //" " + string.Join(" ", str.ToCharArray());
+            textblock.Text = LineToString(line).Trim();
             textblock.FontSize = h;
             textblock.FontWeight = FontWeights.Normal;
             textblock.FontFamily = new FontFamily("Consolas");
             textblock.Foreground = new SolidColorBrush(Colors.Black);
-            // Screw you Microsoft, why can't I just stack TranslateTransforms
-            // and ScaleTransforms??
-//            var t = new MatrixTransform(2.0, 0.0, 0, 1.0, g.Bounds.Left, g.Bounds.Top);
             var t = new TranslateTransform(g.Bounds.Left, g.Bounds.Top);
             textblock.LayoutTransform = t;
             textblock.RenderTransform = t;
             return textblock;
-
-#if false
-            VisualBrush b = new VisualBrush(textblock);
-            GeometryDrawing drawing = new GeometryDrawing(b, new Pen(), g);
-            DrawingImage drawingImage = new DrawingImage(drawing);
-            Image image = new Image();
-            image.Source = drawingImage;
-            Canvas.SetLeft(image, g.Bounds.Left);
-            Canvas.SetTop(image, g.Bounds.Top);
-#endif
         }
-
-        private UIElement previousLine = null;
         private void CreateVisuals(ITextViewLine line)
         {
             try
@@ -208,9 +170,10 @@ namespace SmallBraces
                 Debugger.Break();
             }
         }
-
+        private Image cursor = makeCursor();
         private static Image makeCursor()
         {
+            // Ghetto cursor
             Rect r = new Rect(0, 0, 2, normalLineHeight);
             Geometry g = new RectangleGeometry(r);
             Brush b = new SolidColorBrush(Colors.Black);
@@ -220,35 +183,39 @@ namespace SmallBraces
             image.Source = drawingImage;
             return image;
         }
-
-        private Image cursor = makeCursor();
-
+        private void AddLineAdornment(ITextViewLine line)
+        {
+            UIElement newAdornment = CreateVisualsInternal(line);
+            if (newAdornment != null)
+            {
+                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, LineSpan(line), null, newAdornment, null);
+            }
+        }
         void OnCaretPositionChangedInternal(object sender, CaretPositionChangedEventArgs e)
         {
             ITextViewLine newLine = GetLineByPos(e.NewPosition);
             ITextViewLine oldLine = GetLineByPos(e.OldPosition);
-            // TODO: End of document makes this invalid. What we really want is a length
-            // of zero, but AddAdornment pukes when we try that...
-            var start = e.NewPosition.BufferPosition;            
 
-            var span = new SnapshotSpan(_view.TextSnapshot, e.NewPosition.BufferPosition, 1);
-            Geometry g = _view.TextViewLines.GetMarkerGeometry(span);
-            Canvas.SetLeft(cursor, g.Bounds.Left);
-            Canvas.SetTop(cursor, g.Bounds.Top);
-            _layer.RemoveAdornment(cursor);
-            _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, cursor, null);
+            if (GetLineType(newLine) != LineType.Default)
+            {
+                // TODO: End of document makes this invalid. What we really want is a length
+                // of zero, but AddAdornment pukes when we try that...
+                var span = new SnapshotSpan(_view.TextSnapshot, e.NewPosition.BufferPosition, 1);
+                Geometry g = _view.TextViewLines.GetMarkerGeometry(span);
+                Canvas.SetLeft(cursor, g.Bounds.Left);
+                Canvas.SetTop(cursor, g.Bounds.Top - normalLineHeight/2 + 2.0 /*fudge it yeeeeeah*/);
+                _layer.RemoveAdornment(cursor);
+                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, cursor, null);
+            }
 
             if (oldLine == newLine)
             {
                 return;
             }
-            if (previousLine != null) _layer.RemoveAdornment(previousLine);
-            UIElement newAdornment = CreateVisualsInternal(newLine);
-            if (newAdornment != null)
-            {
-                previousLine = newAdornment;
-                _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, LineSpan(newLine), null, newAdornment, null);
-            }
+            _layer.RemoveAdornmentsByVisualSpan(LineSpan(oldLine));
+            _layer.RemoveAdornmentsByVisualSpan(LineSpan(newLine));
+            AddLineAdornment(newLine);
+            AddLineAdornment(oldLine);
         }
         void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e)
         {
