@@ -6,9 +6,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.TextFormatting;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
-using Microsoft.VisualStudio.Text.Editor.OptionsExtensionMethods;
 using Microsoft.VisualStudio.Text.Formatting;
 using Microsoft.VisualStudio.Utilities;
 
@@ -16,29 +16,27 @@ namespace SmallBraces
 {
     public class SmallBraces
     {
-        private Image _cursor;
         private readonly IWpfTextView _view;
         private readonly IAdornmentLayer _layer;
-        private readonly double _normalLineHeight;
 
         public SmallBraces(IWpfTextView view)
         {
             this._view = view;
             _layer = view.GetAdornmentLayer("SmallBracesAdornment");
             Debug.Assert(_layer != null);
-            //var props = _view.FormattedLineSource.DefaultTextProperties;
-            //props.FontRenderingEmSize
-            _normalLineHeight = (double)new FontSizeConverter().ConvertFrom("10pt");
-            _cursor = makeCursor();
         }
+        private TextRunProperties _textProps {
+            get { return _view.FormattedLineSource != null ? _view.FormattedLineSource.DefaultTextProperties : null; }
+        }
+        private double _normalLineHeight { get { return _textProps != null ? _textProps.FontRenderingEmSize : 13; } }
         private Image makeCursor()
         {
-            // Ghetto _cursor
+            // Ghetto cursor
             Debug.Assert(_normalLineHeight > 0.0);
             Rect r = new Rect(0, 0, 1, _normalLineHeight);
             Geometry g = new RectangleGeometry(r);
-            //_view.Properties.GetProperty();
-            Brush b = new SolidColorBrush(Colors.Black);
+
+            Brush b = _textProps.ForegroundBrush.Clone();
             GeometryDrawing drawing = new GeometryDrawing(b, new Pen(), g);
             DrawingImage drawingImage = new DrawingImage(drawing);
             Image image = new Image();
@@ -131,9 +129,9 @@ namespace SmallBraces
             var textblock = new TextBlock();
             textblock.Text = LineToString(line).Trim();
             textblock.FontSize = h;
-            textblock.FontWeight = FontWeights.Normal;
-            textblock.FontFamily = new FontFamily("Consolas");
-            textblock.Foreground = new SolidColorBrush(Colors.Black);
+            textblock.FontWeight = _textProps.Typeface.Weight;
+            textblock.FontFamily = _textProps.Typeface.FontFamily;
+            textblock.Foreground = _textProps.ForegroundBrush;
             var t = new TranslateTransform(g.Bounds.Left, g.Bounds.Top);
             textblock.LayoutTransform = t;
             textblock.RenderTransform = t;
@@ -147,6 +145,8 @@ namespace SmallBraces
                 _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, LineSpan(line), null, element, null);
             }
         }
+
+        private Image _cursor;
         public void OnCaretPositionChanged(object sender, CaretPositionChangedEventArgs e)
         {
             ITextViewLine newLine = GetLineByPos(e.NewPosition);
@@ -161,8 +161,10 @@ namespace SmallBraces
                 CreateVisuals(oldLine);
             }
 
-            _layer.RemoveAdornment(_cursor);
-            _cursor = makeCursor(); // TODO: Remove this after debugging!
+            if (_cursor != null) _layer.RemoveAdornment(_cursor);
+            // We remake this each time because it seems fast enough, and it lets us have the cursor
+            // not blink when it is moving (just like the real visual studio!)
+            _cursor = makeCursor();
             if (GetLineType(newLine) != LineType.Default)
             {
                 SnapshotSpan span;
@@ -185,6 +187,10 @@ namespace SmallBraces
         }
     }
 
+    // Visual studio doesn't give us an easy way to debug exceptions when the happen, just
+    // displaying a message box that says "an exception has occurred...". Thus, we make this
+    // wrapper class so that we can catch all the exceptions we might throw and debug them
+    // properly.
     public class SmallBracesWrapper : ILineTransformSource
     {
         private readonly SmallBraces _wrapped;
@@ -248,6 +254,8 @@ namespace SmallBraces
             }
         }
     }
+
+    // Boilerplate to register us with Visual Studio
     [Export(typeof(IWpfTextViewCreationListener))]
     [ContentType("text")]
     [TextViewRole(PredefinedTextViewRoles.Document)]
