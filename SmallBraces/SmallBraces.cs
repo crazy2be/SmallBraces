@@ -16,7 +16,7 @@ namespace SmallBraces
 {
     public class SmallBraces
     {
-        private readonly Image _cursor;
+        private Image _cursor;
         private readonly IWpfTextView _view;
         private readonly IAdornmentLayer _layer;
         private readonly double _normalLineHeight;
@@ -44,15 +44,14 @@ namespace SmallBraces
             Image image = new Image();
             image.Source = drawingImage;
             
-
-            // TODO: This animation doesn't seem to work??
-//            var anim = new ObjectAnimationUsingKeyFrames();
-//            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Visible, KeyTime.FromPercent(0.5)));
-//            anim.KeyFrames.Add(new DiscreteObjectKeyFrame(Visibility.Hidden, KeyTime.FromPercent(1.0)));
-//            anim.RepeatBehavior = RepeatBehavior.Forever;
-//            anim.Duration = TimeSpan.FromMilliseconds(3000);
-//            anim.BeginTime = TimeSpan.Zero;
-//            image.BeginAnimation(Image.VisibilityProperty, anim);
+            var anim2 = new DoubleAnimationUsingKeyFrames();
+            anim2.KeyFrames.Add(new DiscreteDoubleKeyFrame(0.0, KeyTime.FromPercent(0.5)));
+            anim2.KeyFrames.Add(new DiscreteDoubleKeyFrame(1.0, KeyTime.FromPercent(1.0)));
+            anim2.RepeatBehavior = RepeatBehavior.Forever;
+            anim2.BeginTime = TimeSpan.Zero;
+            // http://www.windowsnetworking.com/kbase/WindowsTips/WindowsNT/RegistryTips/Miscellaneous/RegistryTipCursorBlinkRate.html
+            anim2.Duration = new Duration(TimeSpan.FromMilliseconds(530*2));
+            b.BeginAnimation(Brush.OpacityProperty, anim2);
 
             return image;
         }
@@ -163,6 +162,7 @@ namespace SmallBraces
             }
 
             _layer.RemoveAdornment(_cursor);
+            _cursor = makeCursor(); // TODO: Remove this after debugging!
             if (GetLineType(newLine) != LineType.Default)
             {
                 SnapshotSpan span;
