@@ -1,4 +1,5 @@
 ﻿using System;
+using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Mime;
@@ -11,6 +12,7 @@ using System.Windows.Shapes;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Formatting;
+using Microsoft.VisualStudio.Utilities;
 
 namespace SmallBraces
 {
@@ -244,6 +246,36 @@ namespace SmallBraces
 //                    top,
 //                    ViewRelativePosition.Top);
 //            }
+        }
+    }
+
+    [Export(typeof(IWpfTextViewCreationListener))]
+    [ContentType("text")]
+    [TextViewRole(PredefinedTextViewRoles.Document)]
+    internal sealed class SmallBracesAdornmentFactory : IWpfTextViewCreationListener
+    {
+        /// <summary>
+        /// Defines the adornment layer for the adornment. This layer is ordered 
+        /// after the selection layer in the Z-order
+        /// </summary>
+        [Export(typeof(AdornmentLayerDefinition))]
+        [Name("SmallBracesAdornment")]
+        [Order(After = PredefinedAdornmentLayers.Selection, Before = PredefinedAdornmentLayers.Text)]
+        [TextViewRole(PredefinedTextViewRoles.Document)]
+        public AdornmentLayerDefinition editorAdornmentLayer = null;
+
+        public void TextViewCreated(IWpfTextView textView)
+        {
+            SmallBraces.Create(textView);
+        }
+    }
+
+    [Export(typeof(ILineTransformSourceProvider)), ContentType("text"), TextViewRole(PredefinedTextViewRoles.Document)]
+    internal sealed class SmallBracesFactory : ILineTransformSourceProvider
+    {
+        ILineTransformSource ILineTransformSourceProvider.Create(IWpfTextView textView)
+        {
+            return SmallBraces.Create(textView);
         }
     }
 }
