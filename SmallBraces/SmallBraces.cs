@@ -176,7 +176,7 @@ namespace SmallBraces
         private static Image makeCursor()
         {
             // Ghetto cursor
-            Rect r = new Rect(0, 0, 2, normalLineHeight);
+            Rect r = new Rect(0, 0, 1, normalLineHeight);
             Geometry g = new RectangleGeometry(r);
             Brush b = new SolidColorBrush(Colors.Black);
             GeometryDrawing drawing = new GeometryDrawing(b, new Pen(), g);
@@ -198,6 +198,7 @@ namespace SmallBraces
             ITextViewLine newLine = GetLineByPos(e.NewPosition);
             ITextViewLine oldLine = GetLineByPos(e.OldPosition);
 
+            _layer.RemoveAdornment(cursor);
             if (GetLineType(newLine) != LineType.Default)
             {
                 // TODO: End of document makes this invalid. What we really want is a length
@@ -206,7 +207,6 @@ namespace SmallBraces
                 Geometry g = _view.TextViewLines.GetMarkerGeometry(span);
                 Canvas.SetLeft(cursor, g.Bounds.Left);
                 Canvas.SetTop(cursor, g.Bounds.Top - normalLineHeight/2 + 2.0 /*fudge it yeeeeeah*/);
-                _layer.RemoveAdornment(cursor);
                 _layer.AddAdornment(AdornmentPositioningBehavior.TextRelative, span, null, cursor, null);
             }
 
