@@ -10,6 +10,7 @@ using System.Windows.Media.TextFormatting;
 using Microsoft.VisualStudio.Text;
 using Microsoft.VisualStudio.Text.Editor;
 using Microsoft.VisualStudio.Text.Formatting;
+using Microsoft.VisualStudio.Text.Outlining;
 using Microsoft.VisualStudio.Utilities;
 
 namespace SmallBraces
@@ -21,7 +22,7 @@ namespace SmallBraces
 
         public SmallBraces(IWpfTextView view)
         {
-            this._view = view;
+            _view = view;
             _layer = view.GetAdornmentLayer("SmallBracesAdornment");
             Debug.Assert(_layer != null);
         }
@@ -57,16 +58,20 @@ namespace SmallBraces
         private enum LineType
         {
             JustWhitespace,
-            JustCommentCruft,
+            JustCruft,
             JustBraces,
-            Default,
+            Default
         };
         private LineType GetLineStringType(string line)
         {
             line = line.Trim();
             if (line.Equals("")) return LineType.JustWhitespace;
-            if (line.Equals("/// <summary>") || line.Equals("/// </summary>")) return LineType.JustCommentCruft;
-            if (Regex.IsMatch(line, @"^[(){}\s]+$")) return LineType.JustBraces;
+            if (line.Equals("/// <summary>") || line.Equals("/// </summary>")
+                || line.StartsWith("#region") || line.StartsWith("#endregion")
+                || line.Equals("/// <remarks>") || line.Equals("/// </remarks>")
+                || line.Equals("[Pure]") || line.Equals("break;"))
+                    return LineType.JustCruft;
+            if (Regex.IsMatch(line, @"^[(){};,\s]+$")) return LineType.JustBraces;
             return LineType.Default;
         }
         private string LineToString(ITextViewLine line)
@@ -90,7 +95,7 @@ namespace SmallBraces
             {
                 case LineType.JustWhitespace:
                     return new LineTransform(0.5);
-                case LineType.JustCommentCruft:
+                case LineType.JustCruft:
                 case LineType.JustBraces:
                     return new LineTransform(0.0000000001);
                 case LineType.Default:
@@ -131,7 +136,8 @@ namespace SmallBraces
             textblock.FontSize = h;
             textblock.FontWeight = _textProps.Typeface.Weight;
             textblock.FontFamily = _textProps.Typeface.FontFamily;
-            textblock.Foreground = _textProps.ForegroundBrush;
+            textblock.Foreground = _textProps.ForegroundBrush.Clone();
+            if (h != _normalLineHeight) textblock.Foreground.Opacity = 0.5;
             var t = new TranslateTransform(g.Bounds.Left, g.Bounds.Top);
             textblock.LayoutTransform = t;
             textblock.RenderTransform = t;
@@ -211,12 +217,12 @@ namespace SmallBraces
         {
             foreach (ITextViewLine line in e.NewOrReformattedLines)
             {
-                this.CreateVisuals(line);
+                CreateVisuals(line);
             }
         }
         public static SmallBracesWrapper Create(IWpfTextView view)
         {
-            return view.Properties.GetOrCreateSingletonProperty<SmallBracesWrapper>(() => new SmallBracesWrapper(view));
+            return view.Properties.GetOrCreateSingletonProperty(() => new SmallBracesWrapper(view));
         }
         public void CreateVisuals(ITextViewLine line)
         {
@@ -283,6 +289,71 @@ namespace SmallBraces
         ILineTransformSource ILineTransformSourceProvider.Create(IWpfTextView textView)
         {
             return SmallBracesWrapper.Create(textView);
+        }
+    }
+
+
+    //////////////////////////////
+    // Code to disable regions (they break our other code, and also just suck in general).
+    // Inspired by https://visualstudiogallery.msdn.microsoft.com/0ca60d35-1e02-43b7-bf59-ac7deb9afbca
+    public class TextViewHandler
+    {
+        private IWpfTextView _textView;
+        private IOutliningManager _outliningManager;
+
+        public TextViewHandler(IWpfTextView textView, IOutliningManagerService outliningManagerService)
+        {
+            _textView = textView;
+            _outliningManager = outliningManagerService.GetOutliningManager(textView);
+            if (_outliningManager == null)
+                return;
+            _textView.Closed += TextViewClosed;
+            _outliningManager.RegionsCollapsed += ClassifierProviderRegionsCollapsed;
+        }
+
+        private void TextViewClosed(object sender, EventArgs e)
+        {
+            if (_textView != null)
+                _textView.Closed -= TextViewClosed;
+            if (_outliningManager != null)
+                _outliningManager.RegionsCollapsed -= ClassifierProviderRegionsCollapsed;
+            _outliningManager = null;
+            _textView = null;
+        }
+
+        private void ClassifierProviderRegionsCollapsed(object sender, RegionsCollapsedEventArgs e)
+        {
+            foreach (ICollapsed collapsible in e.CollapsedRegions)
+            {
+                if (collapsible.Extent.TextBuffer != _textView.TextBuffer) continue;
+                if (!collapsible.IsCollapsed) continue;
+
+                string text = collapsible.Extent.GetText(collapsible.Extent.TextBuffer.CurrentSnapshot);
+                if (!text.TrimStart().ToLower().StartsWith("#region")) continue;
+                try
+                {
+                    ((IOutliningManager)sender).Expand(collapsible);
+                }
+                catch (InvalidOperationException ex) {}
+            }
+
+            //((IOutliningManager)sender).RegionsCollapsed -= new EventHandler<RegionsCollapsedEventArgs>(this.ClassifierProviderRegionsCollapsed);
+        }
+    }
+
+    [Export(typeof(IWpfTextViewCreationListener))]
+    [ContentType("CSharp"), ContentType("Basic")]
+    [TextViewRole(PredefinedTextViewRoles.Document)]
+    internal class TestViewCreationListener : IWpfTextViewCreationListener
+    {
+        [Import(typeof(IOutliningManagerService))]
+        public IOutliningManagerService OutliningManagerService { get; set; }
+
+        public void TextViewCreated(IWpfTextView textView)
+        {
+            if (textView == null || OutliningManagerService == null)
+                return;
+            TextViewHandler textViewHandler = new TextViewHandler(textView, OutliningManagerService);
         }
     }
 }
